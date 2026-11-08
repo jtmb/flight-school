@@ -19,12 +19,13 @@ OpenCode auto-discovers `.agents/skills`, so every directory with a valid `SKILL
 below it is advertised as a skill. Config changes reload without a restart
 (`/reload` to force).
 
-## The `name:` field is the skill ID
+## Runtime IDs and frontmatter names
 
-The skill ID OpenCode advertises is the `name:` frontmatter value, which is **not**
-always the same as the folder name. Use the ID below when referring to a skill.
+There are **24 skills**. In this OpenCode runtime, the callable ID is path-derived
+(the folder name), while `name:` supplies the display name. They can differ.
+Use the first column when calling the skill; the second records its frontmatter.
 
-| Folder | Skill ID (`name:`) | Category |
+| Folder / runtime ID | Frontmatter name | Category |
 | --- | --- | --- |
 | `taste-skill` | `design-taste-frontend` | Design / UI |
 | `gpt-tasteskill` | `gpt-taste` | Design / UI |
@@ -43,6 +44,13 @@ always the same as the folder name. Use the ID below when referring to a skill.
 | `output-skill` | `full-output-enforcement` | Quality / process |
 | `testing-skill` | `testing-skill` | Quality / process |
 | `artifact-delivery` | `artifact-delivery` | Quality / process |
+| `agent-memory` | `task-memory` | Memory / learning |
+| `self-learning` | `self-learning` | Memory / learning |
+| `github-operations` | `github-operations` | Integrations |
+| `opencode-playwright-setup` | `opencode-playwright-setup` | Integrations |
+| `websearch` | `websearch` | Integrations |
+| `game-readme` | `game-readme` | Games / README |
+| `gameplay-gif` | `gameplay-gif` | Games / README |
 
 ## Categories
 
@@ -85,6 +93,29 @@ always the same as the folder name. Use the ID below when referring to a skill.
   proportionately, stop when requirements and applicable checks are satisfied.
 - **`artifact-delivery`** — deliver previews over a local loopback HTTPS webserver with a
   self-signed cert and verified links; never public hosts/CDNs or raw filesystem paths.
+
+### Memory / learning (standalone file workflows)
+- **`agent-memory`** (display name `task-memory`) — deliberately save, recall, and
+  forget source-linked Markdown notes through ordinary file operations; no memory
+  service required. Repository scope is default; never auto-publish notes.
+- **`self-learning`** — review available conversations and authorized local evidence,
+  propose evidence-backed improvements, and apply only authorized changes; no
+  dedicated session-analysis integration required.
+
+### Integrations
+- **`github-operations`** — inspect GitHub repositories, issues, PRs, checks, and
+  releases; perform remote changes only within explicit authority.
+- **`opencode-playwright-setup`** — inspect, reuse, or repair headless Playwright MCP
+  configuration for OpenCode V2, including WSL/root environments.
+- **`websearch`** — configure, verify, and troubleshoot available search providers
+  and use exposed search/fetch capabilities for current research.
+
+### Games / README
+- **`game-readme`** — create or redesign a beautiful, concise game README with real
+  gameplay media near the top and verified setup instructions directly underneath.
+- **`gameplay-gif`** — record actual browser or native game footage and convert it
+  into a compact, attractive looping GIF and poster for a README; never uses
+  fictional reference art as published gameplay. Companion: **`game-readme`**.
 
 ## Adding or removing a skill
 

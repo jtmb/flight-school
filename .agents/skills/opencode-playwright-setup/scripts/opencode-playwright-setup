@@ -1,0 +1,791 @@
+#!/usr/bin/env bash
+#
+# opencode-playwright-setup
+#
+# Sets up the Playwright MCP server for OpenCode: installs the headless
+# Chromium build that @playwright/mcp needs, registers the server in OpenCode's
+# GLOBAL config, adds a gitignore rule for page snapshots, and verifies the
+# connection.
+#
+# Design notes:
+#   * Re-runnable and idempotent - only changes what is out of date.
+#   * OS agnostic (Linux, WSL, macOS, Git Bash/MSYS2/Cygwin on Windows).
+#   * User agnostic - everything resolves from $HOME / $XDG_CONFIG_HOME, so it
+#     works for any user and never hardcodes a path.
+#   * Headless only, using Playwright's bundled Chromium (no system browser).
+#
+# Usage:
+#   opencode-playwright-setup              # set up or refresh
+#   opencode-playwright-setup --prune      # also delete unused browser builds
+#   opencode-playwright-setup --with-deps  # also install Chromium system libs
+#   opencode-playwright-setup --check      # read-only config/connection check
+#   opencode-playwright-setup --uninstall  # remove the server from config
+#   opencode-playwright-setup --install-self
+#
+# Environment:
+#   MCP_VERSION   @playwright/mcp version to pin (default: 0.0.83)
+#   SERVER_NAME   MCP server name in OpenCode (default: playwright)
+#   PREFIX        install prefix for --install-self (default: /usr/local)
+#
+set -eu
+set -o pipefail 2>/dev/null || true
+
+PROG=${0##*/}
+MCP_PACKAGE=@playwright/mcp
+MCP_VERSION=${MCP_VERSION:-0.0.83}
+SERVER_NAME=${SERVER_NAME:-playwright}
+SNAPSHOT_IGNORE=.playwright-mcp/
+
+ACTION=setup
+WITH_DEPS=0
+PRUNE=0
+VERIFY=1
+GITIGNORE=1
+
+# Keep npm's upgrade notices out of the way; real errors still surface.
+export npm_config_loglevel=${npm_config_loglevel:-error}
+
+# ---------------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------------
+log()  { printf '%s\n' "$*"; }
+step() { printf '\n==> %s\n' "$*"; }
+info() { printf '    %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+usage() {
+  cat <<'EOF'
+opencode-playwright-setup - configure the Playwright MCP server for OpenCode
+
+Usage: opencode-playwright-setup [options]
+
+Options:
+  --prune           Use Playwright's shared-cache garbage collector during install
+  --with-deps       Install OS packages Chromium needs (Linux only, may use sudo)
+  --no-verify       Skip the "opencode mcp list" connection check
+  --no-gitignore    Do not touch the global git ignore file
+  --uninstall       Remove the server from OpenCode's global config
+  --install-self    Copy this script to a directory on PATH
+  --check           Check the pinned configuration and connection without writes
+  -h, --help        Show this help
+  --version         Print the script and pinned MCP versions
+
+Environment:
+  MCP_VERSION   @playwright/mcp version to pin   (default: 0.0.83)
+  SERVER_NAME   MCP server name in OpenCode      (default: playwright)
+  PREFIX        install prefix for --install-self (default: /usr/local)
+
+The server is always configured headless with Playwright's bundled Chromium, so
+no system browser (Chrome, Firefox, ...) is required.
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# platform / environment detection
+# ---------------------------------------------------------------------------
+OS=unknown
+detect_os() {
+  case $(uname -s 2>/dev/null || echo unknown) in
+    Linux)
+      if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+        OS=wsl
+      else
+        OS=linux
+      fi
+      ;;
+    Darwin)               OS=macos   ;;
+    MINGW*|MSYS*|CYGWIN*) OS=windows ;;
+    *)                    OS=unknown ;;
+  esac
+}
+
+IS_ROOT=0
+[ "$(id -u 2>/dev/null || echo 1)" = 0 ] && IS_ROOT=1
+
+ensure_node() {
+  have node || die "Node.js >= 18 is required. Install it from https://nodejs.org or your package manager."
+  have npx  || die "npx is required (it ships with npm). Install Node.js >= 18."
+  _major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+  if ! [ "${_major:-0}" -ge 18 ] 2>/dev/null; then
+    die "Node.js $(node -v 2>/dev/null) is too old; @playwright/mcp needs >= 18."
+  fi
+  case $OS in
+    linux|wsl)
+      [ "$(node -p 'process.platform')" = linux ] || die "Use Linux Node/npx in this Linux shell, not Windows Node inherited through WSL PATH."
+      ;;
+  esac
+}
+
+# Global OpenCode config file (V2: $XDG_CONFIG_HOME/opencode/opencode.json[c]).
+config_file() {
+  _base=${XDG_CONFIG_HOME:-$HOME/.config}
+  _dir=$_base/opencode
+  if [ -f "$_dir/opencode.jsonc" ] && [ ! -f "$_dir/opencode.json" ]; then
+    printf '%s\n' "$_dir/opencode.jsonc"
+  else
+    printf '%s\n' "$_dir/opencode.json"
+  fi
+}
+
+# Playwright's browser cache for the current platform.
+browser_cache_dir() {
+  if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+    printf '%s\n' "$PLAYWRIGHT_BROWSERS_PATH"
+    return
+  fi
+  case $OS in
+    macos)   printf '%s\n' "$HOME/Library/Caches/ms-playwright" ;;
+    windows) printf '%s\n' "${LOCALAPPDATA:-$HOME/AppData/Local}/ms-playwright" ;;
+    *)       printf '%s\n' "$HOME/.cache/ms-playwright" ;;
+  esac
+}
+
+build_command() {
+  CMD=(npx -y "$MCP_PACKAGE@$MCP_VERSION" --headless --browser chromium)
+  # Chromium's sandbox cannot initialise for uid 0 (root, containers, some WSL
+  # images), so relax it only in that case.
+  if [ "$IS_ROOT" = 1 ]; then
+    CMD+=(--no-sandbox)
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# config editing: a JSONC-aware scanner locates only the MCP entry and splices
+# that one span, so the rest of the file is never reformatted. Comments,
+# escapes, key order and spacing are preserved; if nothing needs to change the
+# file is not written at all.
+# ---------------------------------------------------------------------------
+edit_config() {
+  _file=$1
+  _name=$2
+  _cmdjson=$3
+  _action=$4
+  node - "$_file" "$_name" "$_cmdjson" "$_action" <<'NODE'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const SCHEMA = 'https://opencode.ai/config.json';
+const [file, name, cmdJson, action] = process.argv.slice(2);
+
+/* ------------- validation helpers (comments / trailing commas) ------------- */
+
+/* Remove line and block comments, respecting strings. */
+function stripComments(text) {
+  let out = '', inStr = false, esc = false, line = false, block = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i + 1];
+    if (line) { if (c === '\n') { line = false; out += c; } continue; }
+    if (block) { if (c === '*' && n === '/') { block = false; i++; } continue; }
+    if (inStr) {
+      out += c;
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === '/' && n === '/') { line = true; out += ' '; i++; continue; }
+    if (c === '/' && n === '*') { block = true; out += ' '; i++; continue; }
+    out += c;
+  }
+  if (block) throw new Error('unterminated block comment');
+  return out;
+}
+
+/* Drop commas that directly precede a closing brace or bracket. */
+function dropTrailingCommas(text) {
+  let out = '', inStr = false, esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      out += c;
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === ',') {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === '}' || text[j] === ']') continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+function cleanJsonc(text) {
+  return dropTrailingCommas(stripComments(text));
+}
+
+function fail(msg) {
+  process.stderr.write('error: ' + msg + '\n');
+  process.exit(3);
+}
+
+function out(msg) {
+  process.stdout.write(msg + '\n');
+}
+
+/* ------------- position-aware scanner -------------
+   Builds a tree of nodes with absolute offsets so a change can be spliced
+   into the original text. Everything outside the edited span stays exactly
+   as the user wrote it: comments, escapes such as \u2014, key order, spacing. */
+function scan(src) {
+  let i = 0;
+  const n = src.length;
+  const bad = function (msg) { throw new Error(msg + ' at offset ' + i); };
+
+  function skip() {
+    for (;;) {
+      while (i < n && (src[i] === ' ' || src[i] === '\t' ||
+                       src[i] === '\n' || src[i] === '\r')) i++;
+      if (src[i] === '/' && src[i + 1] === '/') {
+        while (i < n && src[i] !== '\n') i++;
+        continue;
+      }
+      if (src[i] === '/' && src[i + 1] === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        if (i >= n) bad('unterminated block comment');
+        i += 2;
+        continue;
+      }
+      break;
+    }
+  }
+
+  function readString() {
+    const start = i;
+    i++;
+    while (i < n) {
+      const c = src[i];
+      if (c === '\\') { i += 2; continue; }
+      if (c === '"') { i++; return src.slice(start, i); }
+      i++;
+    }
+    bad('unterminated string');
+  }
+
+  function readValue() {
+    skip();
+    const start = i;
+    const c = src[i];
+    if (c === '{') { const obj = readObject(); obj.start = start; return obj; }
+    if (c === '[') { const arr = readArray(); arr.start = start; return arr; }
+    if (c === '"') { readString(); return { type: 'string', start: start, end: i }; }
+    const m = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(src.slice(i));
+    if (!m) bad('unexpected token');
+    i += m[0].length;
+    return { type: 'literal', start: start, end: i };
+  }
+
+  function readObject() {
+    const node = { type: 'object', start: i, end: -1, members: [] };
+    i++;
+    skip();
+    if (src[i] === '}') { i++; node.end = i; return node; }
+    for (;;) {
+      skip();
+      const keyStart = i;
+      if (src[i] !== '"') bad('expected a quoted key');
+      const key = JSON.parse(readString());
+      if (node.members.some(member => member.key === key)) bad('duplicate object key');
+      skip();
+      if (src[i] !== ':') bad("expected ':'");
+      i++;
+      const value = readValue();
+      const member = { key: key, keyStart: keyStart, value: value };
+      node.members.push(member);
+      skip();
+      if (src[i] === ',') {
+        member.comma = i;
+        i++;
+        skip();
+        if (src[i] === '}') { i++; break; }
+        continue;
+      }
+      if (src[i] === '}') { i++; break; }
+      bad("expected ',' or '}'");
+    }
+    node.end = i;
+    return node;
+  }
+
+  function readArray() {
+    const node = { type: 'array', start: i, end: -1, items: [] };
+    i++;
+    skip();
+    if (src[i] === ']') { i++; node.end = i; return node; }
+    for (;;) {
+      node.items.push(readValue());
+      skip();
+      if (src[i] === ',') {
+        i++;
+        skip();
+        if (src[i] === ']') { i++; break; }
+        continue;
+      }
+      if (src[i] === ']') { i++; break; }
+      bad("expected ',' or ']'");
+    }
+    node.end = i;
+    return node;
+  }
+
+  skip();
+  const root = readValue();
+  skip();
+  if (i !== n) bad('trailing content');
+  return root;
+}
+
+/* ------------- splice helpers ------------- */
+
+function memberOf(node, key) {
+  if (!node || node.type !== 'object') return null;
+  for (let k = 0; k < node.members.length; k++) {
+    if (node.members[k].key === key) return node.members[k];
+  }
+  return null;
+}
+
+function lineIndent(src, pos) {
+  let s = pos;
+  while (s > 0 && src[s - 1] !== '\n') s--;
+  let e = s;
+  while (e < src.length && (src[e] === ' ' || src[e] === '\t')) e++;
+  return src.slice(s, e);
+}
+
+function reindent(block, pad) {
+  return block.split('\n').map(function (line, idx) {
+    return idx === 0 ? line : pad + line;
+  }).join('\n');
+}
+
+let EOL = '\n';
+
+function withEol(text) {
+  return EOL === '\n' ? text : text.split('\n').join(EOL);
+}
+
+function equal(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every(function (v, k) { return equal(v, b[k]); });
+  }
+  if (a && b && typeof a === 'object') {
+    const ka = Object.keys(a).sort();
+    const kb = Object.keys(b).sort();
+    if (ka.length !== kb.length) return false;
+    for (let k = 0; k < ka.length; k++) {
+      if (ka[k] !== kb[k]) return false;
+      if (!equal(a[ka[k]], b[kb[k]])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function insertMember(src, obj, key, value) {
+  const indent = lineIndent(src, obj.start);
+  const pad = indent + '  ';
+  const body = JSON.stringify(key) + ': ' +
+    reindent(JSON.stringify(value, null, 2), pad);
+
+  if (obj.members.length === 0) {
+    const at = obj.start + 1;
+    return src.slice(0, at) + withEol('\n' + pad + body + '\n' + indent) + src.slice(at);
+  }
+
+  /* Append after the last member so new keys read naturally at the end of the
+     object, reusing whatever comma/whitespace the user already has. */
+  const last = obj.members[obj.members.length - 1];
+  const separated = last.comma !== undefined;
+  const at = separated ? last.comma + 1 : last.value.end;
+  return src.slice(0, at) +
+    withEol((separated ? '' : ',') + '\n' + pad + body) +
+    src.slice(at);
+}
+
+function replaceValue(src, node, value) {
+  /* The value starts inline after "key":, so continuation lines are indented
+     relative to the key's line, which JSON.stringify already offsets by two. */
+  const pad = lineIndent(src, node.start);
+  const chunk = reindent(JSON.stringify(value, null, 2), pad);
+  return src.slice(0, node.start) + withEol(chunk) + src.slice(node.end);
+}
+
+function removeMember(src, obj, key) {
+  let idx = -1;
+  for (let k = 0; k < obj.members.length; k++) {
+    if (obj.members[k].key === key) { idx = k; break; }
+  }
+  if (idx < 0) return src;
+
+  const m = obj.members[idx];
+  // Remove the entry and just its separating comma; retain surrounding comments.
+  const comma = m.comma !== undefined ? m.comma :
+    (idx > 0 ? obj.members[idx - 1].comma : undefined);
+  if (comma !== undefined && comma >= m.value.end) {
+    src = src.slice(0, comma) + src.slice(comma + 1);
+  }
+  src = src.slice(0, m.keyStart) + src.slice(m.value.end);
+  if (comma !== undefined && comma < m.keyStart) {
+    src = src.slice(0, comma) + src.slice(comma + 1);
+  }
+  return src;
+}
+
+/* ------------- main ------------- */
+
+if (!fs.existsSync(file)) {
+  if (action === 'uninstall') { out('unchanged'); process.exit(0); }
+  if (action === 'validate') { out('valid'); process.exit(0); }
+  if (action === 'check') fail(file + ' does not exist; run setup first');
+  const fresh = { $schema: SCHEMA, mcp: { servers: {} } };
+  fresh.mcp.servers[name] = { type: 'local', command: JSON.parse(cmdJson) };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(fresh, null, 2) + '\n');
+  out('written');
+  process.exit(0);
+}
+
+const originalBytes = fs.readFileSync(file);
+const original = originalBytes.toString('utf8');
+if (!Buffer.from(original).equals(originalBytes)) fail(file + ' is not valid UTF-8');
+const bom = original.charCodeAt(0) === 0xFEFF ? '\uFEFF' : '';
+let src = bom ? original.slice(1) : original;
+
+/* Keep the file's existing line endings for anything we insert. */
+if (src.indexOf('\r\n') !== -1) EOL = '\r\n';
+
+try {
+  JSON.parse(src);
+} catch (plainErr) {
+  try {
+    JSON.parse(cleanJsonc(src));
+  } catch (err) {
+    fail(file + ' is not valid JSON: ' + err.message);
+  }
+}
+
+let tree;
+try {
+  tree = scan(src);
+} catch (err) {
+  fail('could not locate the MCP entry in ' + file + ': ' + err.message);
+}
+if (tree.type !== 'object') fail(file + ' must contain a JSON object');
+
+const mcp = memberOf(tree, 'mcp');
+if (mcp && mcp.value.type !== 'object') fail('"mcp" in ' + file + ' is not an object');
+const servers = mcp ? memberOf(mcp.value, 'servers') : null;
+if (servers && servers.value.type !== 'object') {
+  fail('"mcp.servers" in ' + file + ' is not an object');
+}
+const entry = servers ? memberOf(servers.value, name) : null;
+if (entry && action !== 'uninstall' && entry.value.type !== 'object') {
+  fail('server ' + name + ' is not an object');
+}
+if (action === 'validate') { out('valid'); process.exit(0); }
+if (action === 'check') {
+  if (!entry) fail('server ' + name + ' is not configured');
+  const configured = JSON.parse(cleanJsonc(src.slice(entry.value.start, entry.value.end)));
+  if (configured.type !== 'local' || !equal(configured.command, JSON.parse(cmdJson))) {
+    fail('server ' + name + ' differs from the pinned headless command; run setup');
+  }
+  if (configured.disabled === true) fail('server ' + name + ' is explicitly disabled');
+  out('unchanged'); process.exit(0);
+}
+
+if (action === 'uninstall') {
+  if (!entry) { out('unchanged'); process.exit(0); }
+  src = removeMember(src, servers.value, name);
+} else {
+  const value = { type: 'local', command: JSON.parse(cmdJson) };
+  if (entry) {
+    if (entry.value.type !== 'object') fail('server ' + name + ' is not an object');
+    const current = JSON.parse(cleanJsonc(src.slice(entry.value.start, entry.value.end)));
+    if (current.type && current.type !== 'local') fail('refusing to replace a non-local server');
+    // Change only managed fields. Retain environment, timeout, disabled, comments.
+    for (const key of ['type', 'command']) {
+      tree = scan(src);
+      const target = memberOf(memberOf(memberOf(tree, 'mcp').value, 'servers').value, name).value;
+      const field = memberOf(target, key);
+      if (field) {
+        const present = JSON.parse(cleanJsonc(src.slice(field.value.start, field.value.end)));
+        if (!equal(present, value[key])) src = replaceValue(src, field.value, value[key]);
+      } else src = insertMember(src, target, key, value[key]);
+    }
+  } else if (!mcp) {
+    src = insertMember(src, tree, 'mcp', { servers: { [name]: value } });
+  } else if (!servers) {
+    src = insertMember(src, mcp.value, 'servers', { [name]: value });
+  } else {
+    src = insertMember(src, servers.value, name, value);
+  }
+}
+
+try {
+  JSON.parse(src);
+} catch (plainErr) {
+  try {
+    JSON.parse(cleanJsonc(src));
+  } catch (err) {
+    fail('refusing to write invalid JSON: ' + err.message);
+  }
+}
+
+if (bom + src === original) { out('unchanged'); process.exit(0); }
+
+fs.mkdirSync(path.dirname(file), { recursive: true });
+if (!fs.readFileSync(file).equals(originalBytes)) fail('config changed concurrently; re-read before retrying');
+fs.copyFileSync(file, file + '.bak');
+fs.writeFileSync(file, bom + src);
+out('written');
+NODE
+}
+
+# ---------------------------------------------------------------------------
+# steps
+# ---------------------------------------------------------------------------
+install_browser() {
+  step "Installing headless Chromium required by @playwright/mcp@$MCP_VERSION"
+  if ! npx -y "$MCP_PACKAGE@$MCP_VERSION" install-browser chrome-for-testing; then
+    die "Chromium download failed. Check network/proxy settings and re-run."
+  fi
+  info "cache: $(browser_cache_dir)"
+}
+
+install_deps() {
+  step "Installing Chromium system dependencies"
+  case $OS in
+    linux|wsl) ;;
+    *) warn "not needed on '$OS'; skipping"; return 0 ;;
+  esac
+  _runner=""
+  if [ "$IS_ROOT" != 1 ]; then
+    have sudo || { warn "sudo not available; skipping. Run this pinned setup with --with-deps as root if Chromium fails to start."; return 0; }
+    _runner=sudo
+  fi
+  # Resolve Playwright from this pinned MCP package, never an unrelated @latest.
+  # npm exec puts the package's playwright executable on PATH for this command.
+  # shellcheck disable=SC2086
+  if ! $_runner npx -y --package="$MCP_PACKAGE@$MCP_VERSION" -c 'playwright install-deps chromium'; then
+    warn "could not install system packages automatically (unsupported distribution?)."
+    warn "Chromium may still work; if not, install its shared libraries manually."
+  fi
+}
+
+prune_browsers() {
+  step "Shared-cache cleanup"
+  info "The preceding pinned installer runs Playwright's own garbage collector."
+  info "Other linked Playwright versions are preserved; no manual directory deletion."
+  if [ "${PLAYWRIGHT_SKIP_BROWSER_GC:-0}" = 1 ]; then
+    info "PLAYWRIGHT_SKIP_BROWSER_GC=1 is respected; no builds pruned."
+  fi
+}
+
+setup_gitignore() {
+  step "Ignoring Playwright snapshots in git"
+  if ! have git; then
+    warn "git not found; skipping"
+    return 0
+  fi
+
+  _file=$(git config --global --path --get core.excludesFile 2>/dev/null || true)
+  if [ -z "$_file" ]; then
+    _file=${XDG_CONFIG_HOME:-$HOME/.config}/git/ignore
+  else
+    case $_file in
+      "~"*)  _file=$HOME${_file#\~} ;;
+    esac
+  fi
+
+  if [ -f "$_file" ] && grep -qxF "$SNAPSHOT_IGNORE" "$_file" 2>/dev/null; then
+    info "already present in $_file"
+    return 0
+  fi
+
+  case $_file in
+    */*) mkdir -p "${_file%/*}" ;;
+  esac
+  {
+    printf '\n# Playwright MCP page snapshots\n'
+    printf '%s\n' "$SNAPSHOT_IGNORE"
+  } >>"$_file"
+  info "added '$SNAPSHOT_IGNORE' to $_file"
+}
+
+verify_connection() {
+  step "Verifying the OpenCode connection"
+  if ! have opencode; then
+    die "opencode CLI not found on PATH; use --no-verify only for installation without a health claim"
+  fi
+
+  _out=""
+  _attempt=1
+  while [ "$_attempt" -le 3 ]; do
+    if have timeout; then
+      _out=$(timeout 180 opencode mcp list 2>&1 || true)
+    else
+      _out=$(opencode mcp list 2>&1 || true)
+    fi
+    if printf '%s\n' "$_out" | awk -v name="$SERVER_NAME" '
+      { gsub(/\033\[[0-9;]*m/, ""); for (i=1;i<NF;i++) if ($i==name && $(i+1)=="connected") found=1 }
+      END {exit !found}'; then
+      info "$SERVER_NAME: connected"
+      return 0
+    fi
+    _attempt=$((_attempt + 1))
+    [ "$_attempt" -le 3 ] && sleep 5
+  done
+
+  warn "could not confirm '$SERVER_NAME' is connected. 'opencode mcp list' reported:"
+  printf '%s\n' "$_out" | sed 's/^/    /' >&2
+  return 1
+}
+
+install_self() {
+  step "Installing this script"
+  _src=$0
+  [ -f "$_src" ] || die "cannot install from '$_src' (run the script from a file, not from stdin)"
+
+  _name=${PROG:-opencode-playwright-setup}
+  _prefix=${PREFIX:-/usr/local}
+  _dest=""
+  _sudo=""
+
+  # Prefer the first writable candidate that is already on PATH, so the command
+  # works immediately without touching anyone's shell profile.
+  for _dir in "$_prefix/bin" /usr/local/bin /usr/bin "$HOME/.local/bin"; do
+    [ -d "$_dir" ] || continue
+    case ":$PATH:" in
+      *":$_dir:"*) ;;
+      *) continue ;;
+    esac
+    if [ -w "$_dir" ]; then
+      _dest=$_dir/$_name
+      break
+    fi
+  done
+
+  # Nothing writable on PATH: try sudo on a system bin directory.
+  if [ -z "$_dest" ] && have sudo; then
+    for _dir in "$_prefix/bin" /usr/local/bin /usr/bin; do
+      if [ -d "$_dir" ]; then
+        _dest=$_dir/$_name
+        _sudo=sudo
+        break
+      fi
+    done
+  fi
+
+  # Last resort: a per-user bin directory, with a PATH hint.
+  if [ -z "$_dest" ]; then
+    mkdir -p "$HOME/.local/bin"
+    _dest=$HOME/.local/bin/$_name
+    warn "$HOME/.local/bin is not on PATH; add it to your shell profile"
+  fi
+
+  _src_abs=$(cd "$(dirname "$_src")" && pwd)/$(basename "$_src")
+  if [ "$_src_abs" = "$_dest" ]; then
+    info "already installed at $_dest"
+    return 0
+  fi
+
+  $_sudo mkdir -p "$(dirname "$_dest")"
+  $_sudo cp "$_src" "$_dest"
+  $_sudo chmod 755 "$_dest"
+  info "installed $_dest"
+}
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+main() {
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -h|--help)       usage; exit 0 ;;
+      --version)       log "$PROG (MCP $MCP_PACKAGE@$MCP_VERSION)"; exit 0 ;;
+      --uninstall)     ACTION=uninstall ;;
+      --install-self)  ACTION=install-self ;;
+      --check)         ACTION=check ;;
+      --prune)         PRUNE=1 ;;
+      --with-deps)     WITH_DEPS=1 ;;
+      --no-verify)     VERIFY=0 ;;
+      --no-gitignore)  GITIGNORE=0 ;;
+      -*)              die "unknown option: $1 (try --help)" ;;
+      *)               die "unexpected argument: $1 (try --help)" ;;
+    esac
+    shift
+  done
+
+  detect_os
+  ensure_node
+
+  if [ "$ACTION" = install-self ]; then
+    install_self
+    exit 0
+  fi
+
+  CONFIG=$(config_file)
+  build_command
+  _cmdjson=$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "${CMD[@]}")
+
+  step "OpenCode Playwright MCP setup"
+  info "platform: $OS"
+  info "node:     $(node -v 2>/dev/null)"
+  info "config:   $CONFIG"
+  info "server:   $SERVER_NAME"
+
+  if [ "$ACTION" = check ]; then
+    edit_config "$CONFIG" "$SERVER_NAME" "$_cmdjson" check
+    [ "$VERIFY" = 0 ] || verify_connection
+    exit $?
+  fi
+
+  if [ "$ACTION" = uninstall ]; then
+    _result=$(edit_config "$CONFIG" "$SERVER_NAME" "" uninstall) \
+      || die "could not update $CONFIG"
+    printf '%s\n' "$_result" | sed 's/^/    /'
+    log ""
+    log "Removed '$SERVER_NAME' from $CONFIG."
+    log "Browser builds were left in $(browser_cache_dir); shared builds are preserved."
+    exit 0
+  fi
+
+  # Refuse malformed config before any install/download or other side effect.
+  edit_config "$CONFIG" "$SERVER_NAME" "$_cmdjson" validate >/dev/null
+  install_browser
+  [ "$WITH_DEPS" = 1 ] && install_deps
+  [ "$PRUNE" = 1 ] && prune_browsers
+
+  step "Registering '$SERVER_NAME' in OpenCode's global config"
+  _result=$(edit_config "$CONFIG" "$SERVER_NAME" "$_cmdjson" setup) \
+    || die "could not update $CONFIG"
+  printf '%s\n' "$_result" | sed 's/^/    /'
+  info "command: ${CMD[*]}"
+
+  [ "$GITIGNORE" = 1 ] && setup_gitignore
+  [ "$VERIFY" = 1 ] && verify_connection
+
+  log ""
+  log "Done. The Playwright tools are available to OpenCode as ${SERVER_NAME}_*"
+  log "  in Code Mode: tools.${SERVER_NAME}.browser_*"
+  log ""
+  log "Next:"
+  log "  * update later:    MCP_VERSION=<version> $PROG"
+  log "  * reclaim space:   $PROG --prune"
+  log "  * remove:          $PROG --uninstall"
+}
+
+main "$@"

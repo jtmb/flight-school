@@ -22,6 +22,9 @@ Authoritative conventions for this repository. `AGENTS.md` defers to this file
 - When the user asks to add agent skills to the repo, make sure they actually load in opencode.
 - Place each skill in `.agents/skills/<name>/SKILL.md` (opencode auto-discovers `.agents/skills`) and add `.agents/skills` to the `skills` array in `opencode.json` so registration is explicit.
 - Confirm the skill's ID (path-derived) and that it has a `description`, then verify it is advertised and loads in opencode before finishing.
+- Keep `.agents/skills/SKILL-INDEX.md` and `.agents/skills/llms.txt` up to date whenever a skill is added, removed, or renamed: update the skill count, folder/runtime ID, frontmatter name, category, and summary in both files, and verify them against the actual `SKILL.md` frontmatter before finishing.
+- Use `agent-memory` (display name `task-memory`) whenever the user asks to remember, recall, or forget a preference, fact, workflow, or decision: load it and follow its file workflow. Never store credentials or private conversations, and never auto-publish notes.
+- Use `self-learning` whenever the user asks to learn from project sessions or repeated workflows, or to improve a skill: load it, review only the authorized evidence and current files, and propose evidence-backed improvements before applying them. Never apply skill changes without user approval.
 
 ## Quality gates
 - Type-check, lint, and the full test suite must pass before committing.

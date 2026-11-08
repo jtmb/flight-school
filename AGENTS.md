@@ -22,6 +22,13 @@ making changes (it is also auto-loaded via `opencode.json`).
 - Add or update tests for any code you change.
 - Fix type, lint, and test failures before finishing.
 
+## Skills
+- Agent skills live in `.agents/skills/`; see `.agents/skills/SKILL-INDEX.md`
+  (and `.agents/skills/llms.txt`) for the current index of all skills.
+- Use `agent-memory` for durable user preferences, facts, workflows, and decisions,
+  and `self-learning` when the user asks to learn from sessions or improve skills;
+  see `RULES.md` for the detailed usage rules.
+
 ## Rules & docs
 - Authoritative rules: `RULES.md` (also loaded via `opencode.json` `instructions`).
 - Detailed documentation: `docs/`.

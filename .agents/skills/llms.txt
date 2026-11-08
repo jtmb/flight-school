@@ -1,17 +1,17 @@
 # Skills index (llms.txt)
 
-Machine-readable summary of the agent skills in this repo. Each line: `skill-folder: description`.
+Summary of all 24 agent skills in this repo. Each entry: `runtime-id (folder): description`.
 Loaded via `skills: [".agents/skills"]` in the repo `opencode.json`.
 
 ## Design / UI (implementation)
 taste-skill: The main design skill for premium frontend code. Covers layout, typography, colors, spacing, and motion.
-gpt-taste: Elite Awwwards-level frontend design and GSAP motion skill for premium, deterministic, anti-slop UI generation.
+gpt-tasteskill: Elite Awwwards-level frontend design and GSAP motion skill for premium, deterministic, anti-slop UI generation.
 redesign-skill: For upgrading existing projects by auditing and fixing design problems.
 soft-skill: Focuses on an expensive, soft UI look with premium fonts, whitespace, depth, and smooth animations.
-minimalist-ui: Enforces clean, editorial-style interfaces (Notion/Linear style) with strict monochrome palettes.
-industrial-brutalist-ui: Raw mechanical interfaces, Swiss typography, extreme scale contrast, military-terminal aesthetics.
-stitch-design-taste: Google Stitch-compatible semantic design rules for premium AI UI generation.
-image-to-code: Image-first frontend skill for generating premium website references, deeply analyzing them, and implementing code to match.
+minimalist-skill: Enforces clean, editorial-style interfaces (Notion/Linear style) with strict monochrome palettes.
+brutalist-skill: Raw mechanical interfaces, Swiss typography, extreme scale contrast, military-terminal aesthetics.
+stitch-skill: Google Stitch-compatible semantic design rules for premium AI UI generation.
+image-to-code-skill: Image-first frontend skill for generating premium website references, deeply analyzing them, and implementing code to match.
 
 ## Image generation (references only)
 imagegen-frontend-web: Image-generation-only skill for creating premium website design reference images. Does not write code.
@@ -27,3 +27,16 @@ threejs-materials-lighting: Materialize and light a three.js scene: PBR material
 output-skill: Prevents AI from being lazy — skips code blocks or placeholder comments; enforces complete, unabridged output.
 testing-skill: Applies a risk-based testing policy — reuse existing coverage, verify real behavior proportionately, stop when requirements and applicable checks pass.
 artifact-delivery: Delivers local HTTPS previews via a loopback self-signed webserver with verified links; never uses public hosts/CDNs or raw filesystem paths as deliverables.
+
+## Memory / learning (standalone file workflows)
+agent-memory: Save, recall, and deliberately forget concise, source-linked Markdown notes through ordinary file operations; display name task-memory. No memory service required.
+self-learning: Review available project-session evidence and current files, propose evidence-backed skill improvements, and apply only authorized edits. No dedicated analysis integration required.
+
+## Integrations
+github-operations: Inspect GitHub repositories, issues, PRs, checks, and releases; perform remote changes only with explicit authority.
+opencode-playwright-setup: Inspect, reuse, or repair the headless Playwright MCP setup for OpenCode V2, including WSL/root environments.
+websearch: Configure, verify, and troubleshoot available search providers and use exposed search/fetch capabilities for current research.
+
+## Games / README
+game-readme: Create or redesign a beautiful, concise game README with real gameplay media near the top and verified setup instructions directly underneath. Works with the companion gameplay-gif skill.
+gameplay-gif: Record actual browser or native game footage and convert it into a compact, attractive looping GIF and poster for a README. Does not use fictional reference art as published gameplay.
