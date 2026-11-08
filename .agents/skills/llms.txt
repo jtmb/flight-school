@@ -1,12 +1,29 @@
+# Skills index (llms.txt)
+
+Machine-readable summary of the agent skills in this repo. Each line: `skill-folder: description`.
+Loaded via `skills: [".agents/skills"]` in the repo `opencode.json`.
+
+## Design / UI (implementation)
 taste-skill: The main design skill for premium frontend code. Covers layout, typography, colors, spacing, and motion.
 gpt-taste: Elite Awwwards-level frontend design and GSAP motion skill for premium, deterministic, anti-slop UI generation.
-image-to-code-skill: Image-first frontend skill for generating premium website references, deeply analyzing them, and implementing code to match.
+redesign-skill: For upgrading existing projects by auditing and fixing design problems.
+soft-skill: Focuses on an expensive, soft UI look with premium fonts, whitespace, depth, and smooth animations.
+minimalist-ui: Enforces clean, editorial-style interfaces (Notion/Linear style) with strict monochrome palettes.
+industrial-brutalist-ui: Raw mechanical interfaces, Swiss typography, extreme scale contrast, military-terminal aesthetics.
+stitch-design-taste: Google Stitch-compatible semantic design rules for premium AI UI generation.
+image-to-code: Image-first frontend skill for generating premium website references, deeply analyzing them, and implementing code to match.
+
+## Image generation (references only)
 imagegen-frontend-web: Image-generation-only skill for creating premium website design reference images. Does not write code.
 imagegen-frontend-mobile: Image-generation-only skill for creating premium mobile app screen concepts and flows. Does not write code.
 brandkit: Image-generation-only skill for creating premium brand-kit overview images with logo concepts, identity systems, color palettes, typography, and mockups. Does not write code.
-redesign-skill: For upgrading existing projects by auditing and fixing design problems.
-soft-skill: Focuses on an expensive, soft UI look with premium fonts, whitespace, depth, and smooth animations.
-output-skill: Prevents AI from being lazy, skipping code blocks, or using placeholder comments.
-minimalist-skill: Enforces clean, editorial-style interfaces (Notion/Linear style) with strict monochrome palettes.
-brutalist-skill: Raw mechanical interfaces, Swiss typography, extreme scale contrast. (Beta)
-stitch-skill: Google Stitch-compatible semantic design rules for premium AI UI generation.
+
+## 3D / three.js
+threejs-scene-setup: Stand up a three.js scene: renderer, camera, render loop, responsive resize, OrbitControls, and WebGPURenderer opt-in.
+threejs-gltf-loading: Load glTF/GLB models and play skinned animations (GLTFLoader, AnimationMixer, DRACO/KTX2).
+threejs-materials-lighting: Materialize and light a three.js scene: PBR materials, lights, shadow maps, and environment-map IBL.
+
+## Quality / process
+output-skill: Prevents AI from being lazy — skips code blocks or placeholder comments; enforces complete, unabridged output.
+testing-skill: Applies a risk-based testing policy — reuse existing coverage, verify real behavior proportionately, stop when requirements and applicable checks pass.
+artifact-delivery: Delivers local HTTPS previews via a loopback self-signed webserver with verified links; never uses public hosts/CDNs or raw filesystem paths as deliverables.
