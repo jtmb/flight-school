@@ -1,6 +1,6 @@
 # Skills index (llms.txt)
 
-Summary of all 24 agent skills in this repo. Each entry: `runtime-id (folder): description`.
+Summary of all 27 agent skills in this repo. Each entry: `runtime-id (folder): description`.
 Loaded via `skills: [".agents/skills"]` in the repo `opencode.json`.
 
 ## Design / UI (implementation)
@@ -40,3 +40,8 @@ websearch: Configure, verify, and troubleshoot available search providers and us
 ## Games / README
 game-readme: Create or redesign a beautiful, concise game README with real gameplay media near the top and verified setup instructions directly underneath. Works with the companion gameplay-gif skill.
 gameplay-gif: Record actual browser or native game footage and convert it into a compact, attractive looping GIF and poster for a README. Does not use fictional reference art as published gameplay.
+
+## Flight-school
+flight-implementation (name: flight-implementation): Execute the modular TypeScript game plan, preserve lifecycle/state ownership, and build the read-only observer.
+flight-visual-acceptance (name: flight-visual-acceptance): Inspect actual screenshots with vision against the accepted biplane, canyon, and combat references.
+flight-smoke-check (name: flight-smoke-check): Drive real agent-browser inputs and inspect fresh MCP state/events for focused gameplay acceptance.

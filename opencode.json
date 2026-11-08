@@ -1,5 +1,20 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["RULES.md", "docs/**/*.md"],
-  "skills": [".agents/skills"]
+  "instructions": ["RULES.md", "docs/agent-context.md"],
+  "skills": [".agents/skills"],
+  "mcp": {
+    "servers": {
+      "flight-school": {
+        "type": "local",
+        "command": ["npm", "run", "--silent", "mcp:game"],
+        "cwd": ".",
+        "disabled": true,
+        "codemode": false,
+        "protocol": "auto",
+        "environment": {
+          "FLIGHT_TELEMETRY_URL": "http://127.0.0.1:5173"
+        }
+      }
+    }
+  }
 }

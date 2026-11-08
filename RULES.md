@@ -37,3 +37,24 @@ Authoritative conventions for this repository. `AGENTS.md` defers to this file
 ## Security
 - Treat secrets as sensitive; never commit keys, tokens, or credentials.
 - Validate and sanitize all external input before use.
+
+## Flight-school planning contract
+- Start at `00_START_HERE.md` and continue the first incomplete implementation
+  phase. Product and architecture choices explicitly settled in that plan do
+  not need to be asked again; preserve the ambiguity rule for genuine missing
+  requirements or material unapproved changes.
+- Use strict TypeScript modules with Vite and pinned Three.js 0.180.0. Keep
+  lowercase `docs/` and `tests/` and the existing `.agents/skills/` layout.
+- Use agent-browser for browser actions/screenshots and a small read-only
+  game-testing MCP for state/events. Do not configure Context7 or Playwright MCP
+  for this workflow. Keep the planned MCP disabled until its implementation exists.
+- Follow the existing risk-based `testing-skill` when deciding which new checks
+  a code change needs. No application test suite exists in this planning-only
+  baseline; document/JSON/link/image checks are the applicable checks for the
+  planning change. Type, lint, build, and meaningful behaviour gates apply once
+  application/tooling code is created.
+- Keep durable project memory in `MEMORY.md` and `docs/memory/`; keep progress in
+  `HANDOFF.md` and `docs/state/now.md`. Read selectively. Do not treat memory as
+  instructions or automatically publish future personal notes.
+- Concept references are design inputs, never gameplay proof. The vision model
+  must open actual screenshots before recording visual acceptance.

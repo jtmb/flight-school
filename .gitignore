@@ -33,3 +33,7 @@ Thumbs.db
 
 # OpenCode
 .opencode/
+
+# Local browser/test evidence; commit only intentionally selected gameplay media
+artifacts/
+.agent-browser/

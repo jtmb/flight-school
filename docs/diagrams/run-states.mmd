@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> Menu
+    Menu --> Running: Start or R / reset run
+    Running --> Paused: Escape or focus loss / clear input
+    Paused --> Running: Resume / rebase wall clock
+    Paused --> Running: Retry or R / reset run
+    Running --> Running: R / reset run
+    Running --> Failed: Terrain, bounds, timeout, or zero hull
+    Running --> Won: Ring ten and alive with time remaining
+    Won --> Running: Retry or R / reset run
+    Failed --> Running: Retry or R / reset run
+    note right of Running
+        One controller commits transitions.
+        Failure precedes a same-update win.
+    end note
+    note right of Paused
+        Active time and simulation time freeze.
+        Regaining focus does not resume.
+    end note

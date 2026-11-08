@@ -21,7 +21,7 @@ below it is advertised as a skill. Config changes reload without a restart
 
 ## Runtime IDs and frontmatter names
 
-There are **24 skills**. In this OpenCode runtime, the callable ID is path-derived
+There are **27 skills**. In this OpenCode runtime, the callable ID is path-derived
 (the folder name), while `name:` supplies the display name. They can differ.
 Use the first column when calling the skill; the second records its frontmatter.
 
@@ -51,6 +51,9 @@ Use the first column when calling the skill; the second records its frontmatter.
 | `websearch` | `websearch` | Integrations |
 | `game-readme` | `game-readme` | Games / README |
 | `gameplay-gif` | `gameplay-gif` | Games / README |
+| `flight-implementation` | `flight-implementation` | Flight-school |
+| `flight-visual-acceptance` | `flight-visual-acceptance` | Flight-school |
+| `flight-smoke-check` | `flight-smoke-check` | Flight-school |
 
 ## Categories
 
@@ -116,6 +119,14 @@ Use the first column when calling the skill; the second records its frontmatter.
 - **`gameplay-gif`** — record actual browser or native game footage and convert it
   into a compact, attractive looping GIF and poster for a README; never uses
   fictional reference art as published gameplay. Companion: **`game-readme`**.
+
+### Flight-school
+
+- **`flight-implementation`** — implement the accepted modular TypeScript game and its read-only observer.
+- **`flight-visual-acceptance`** — review actual cockpit and combat screenshots with vision against the three approved concepts.
+- **`flight-smoke-check`** — use real agent-browser controls and bounded MCP evidence for focused acceptance.
+
+For this project, these workflows use agent-browser; the existing Playwright setup skill remains a reusable resource and is not the selected game workflow. Read only relevant skill bodies.
 
 ## Adding or removing a skill
 

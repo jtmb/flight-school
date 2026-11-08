@@ -1,0 +1,12 @@
+flowchart TD
+    Main["main.ts"] --> Game["core/game.ts"]
+    Game --> Input["Input actions"]
+    Game --> World["Terrain, course, enemy handles"]
+    Game --> Systems["Flight and combat"]
+    World --> Systems
+    Input --> Systems
+    Systems --> State["Authoritative run state"]
+    State --> View["Camera, cockpit, HUD"]
+    State --> Debug["Copied development observations"]
+    Debug --> Bridge["Loopback bridge"]
+    Bridge --> MCP["Read-only testing MCP"]
