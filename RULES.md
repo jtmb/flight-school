@@ -18,6 +18,11 @@ Authoritative conventions for this repository. `AGENTS.md` defers to this file
 - `tests/` holds the test suite; keep tests deterministic and independent of order.
 - `docs/` holds design, API, and operational documentation; keep it current with the code.
 
+## Skills
+- When the user asks to add agent skills to the repo, make sure they actually load in opencode.
+- Place each skill in `.agents/skills/<name>/SKILL.md` (opencode auto-discovers `.agents/skills`) and add `.agents/skills` to the `skills` array in `opencode.json` so registration is explicit.
+- Confirm the skill's ID (path-derived) and that it has a `description`, then verify it is advertised and loads in opencode before finishing.
+
 ## Quality gates
 - Type-check, lint, and the full test suite must pass before committing.
 - Add or update tests alongside the code you change.
