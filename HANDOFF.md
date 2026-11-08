@@ -9,6 +9,7 @@ preceded by web research on agent-friendly repo design. Then install agent skill
 and wire them into opencode.
 
 ## Completed & verified
+- Remote: public `https://github.com/jtmb/flight-school` (created via `gh repo create --public` as account `jtmb`); `origin` set, `main` pushed and verified (5 commits, all files + `.agents/skills` present).
 - `git init -b main` — 4 commits, tree clean.
   - `a40e4d0` scaffold (AGENTS.md, RULES.md, tests/, docs/, opencode.json, .gitignore)
   - `dfdf57d` three.js skills (3)
